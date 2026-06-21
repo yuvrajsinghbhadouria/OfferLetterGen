@@ -85,8 +85,4 @@ Log file is written to `Logs/offer_letters.log` and controlled via `LOG_LEVEL` i
 - Template placeholders used by `docxtpl` include: `{name}`, `{company_name}`, `{role}`, `{date}`, `{duty}`, `{duration}`, `{mode}`, `{commitment}`, `{stipend}`, `{intern_id}`.
 - If a PDF is missing for a row, the email will not be sent for that record and it will be logged.
 
-If you'd like, I can also:
-- add a short example `Data/interns.xlsx` template,
-- add CI checks or GitHub Actions,
-- or improve the `.env.example` with all available variables.
 
