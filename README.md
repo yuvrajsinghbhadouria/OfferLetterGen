@@ -24,10 +24,14 @@ This project generates personalized offer letters from a Word template and sends
 Install required packages before running the scripts:
 
 ```powershell
-pip install pandas docxtpl pywin32 openpyxl
+python -m pip install -r requirements.txt
 ```
 
 ## Configuration
+
+Copy `.env.example` to `.env` and fill in your values. The scripts will automatically load Gmail credentials, paths, logging settings, and email template text from `.env`.
+
+If you prefer not to use `.env`, you can continue editing `config.py` directly, but `.env` is recommended for credentials and environment-specific overrides.
 
 Update `config.py` with your organization details and file paths.
 

@@ -3,6 +3,44 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+Pipfile.lock
+
+# IDEs
+.vscode/
+.idea/
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Data and outputs
+Data/
+Generated/
+Logs/
+
+# Template files (keep if intentionally versioned)
+# Template/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.swp
 *.swo
 .DS_Store

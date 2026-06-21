@@ -1,0 +1,6 @@
+pandas
+openpyxl
+docxtpl
+pywin32
+python-dotenv
+tqdm
