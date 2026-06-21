@@ -10,8 +10,8 @@ load_dotenv(BASE_DIR / ".env")
 # EMAIL CONFIGURATION
 # =====================================================
 
-GMAIL_EMAIL = os.getenv("GMAIL_EMAIL", "connectbiopay@gmail.com")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "lbvu loor dwvd khng ")
+GMAIL_EMAIL = os.getenv("GMAIL_EMAIL", "yourgmail@gmail.com")
+GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "16 charachter App password ")
 
 # =====================================================
 # COMPANY DETAILS
