@@ -31,6 +31,7 @@ Thumbs.db
 
 # Data and outputs
 Data/
+!Data/interns.xlsx
 Generated/
 Logs/
 
