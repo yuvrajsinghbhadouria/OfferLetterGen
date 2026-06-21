@@ -1,48 +1,45 @@
+# ── Python ────────────────────────────────────
 venv/
+env/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
+*.egg
+*.egg-info/
+.installed.cfg
 build/
-develop-eggs/
 dist/
+sdist/
+develop-eggs/
 downloads/
 eggs/
 .eggs/
 lib/
 lib64/
 parts/
-sdist/
 var/
-*.egg-info/
-.installed.cfg
-*.egg
 Pipfile.lock
 
-# IDEs
+# ── IDE / OS ──────────────────────────────────
 .vscode/
 .idea/
-
-# OS files
-Thumbs.db
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
 
-# Data and outputs
+# ── SECRETS (never commit these) ──────────────
+.env
+*.env
+*.pem
+*.key
+*.p12
+
+# ── Data & outputs (may contain PII) ──────────
 Data/
-!Data/interns.xlsx
 Generated/
 Logs/
 
-# Template files (keep if intentionally versioned)
-# Template/
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.swp
-*.swo
-.DS_Store
-Logs/
+# ── Keep the example only ─────────────────────
+!.env.example

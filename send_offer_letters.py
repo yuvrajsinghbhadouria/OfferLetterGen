@@ -1,20 +1,17 @@
-﻿import os
-import time
+import os
 import smtplib
-import random
-import string
+import time
+import threading
 from datetime import datetime
 from pathlib import Path
 from email.message import EmailMessage
-from shutil import copy2
-from docxtpl import DocxTemplate
-import win32com.client as win32
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import pandas as pd
 from tqdm import tqdm
 
 from config import *
-from utils import build_safe_attachment_name, find_matching_file, setup_logging, validate_email, unique_filepath
+from utils import build_safe_attachment_name, generate_internship_id, setup_logging, validate_email
 
 logger = setup_logging("send_offer_letters")
 OUTPUT_FOLDER = Path(GENERATED_FOLDER)
@@ -39,31 +36,17 @@ def load_data():
     return df
 
 
-def get_pdf_path(name: str, email: str):
-    base_name = build_safe_attachment_name(name, email)
-    file_path = find_matching_file(OUTPUT_FOLDER, base_name, ".pdf")
-    if file_path:
-        return file_path
-
-    alternate_name = OUTPUT_FOLDER / f"{base_name}.pdf"
-    return alternate_name if alternate_name.exists() else None
+def build_pdf_lookup() -> dict[str, Path]:
+    lookup = {}
+    for path in OUTPUT_FOLDER.glob("*.pdf"):
+        key = path.stem.lower()
+        lookup[key] = path
+    return lookup
 
 
-def generate_internship_id(company_name: str, intern_name: str) -> str:
-    """Generate deterministic 9-character ID: 4 company letters + 2 name letters + 3 hash digits"""
-    try:
-        import hashlib
-        company_prefix = (company_name or '').strip().upper()[:4].ljust(4, 'X')
-        company_prefix = ''.join(ch for ch in company_prefix if ch.isalpha() or ch == 'X')[:4]
-        name_prefix = (intern_name or '').strip().upper()[:2].ljust(2, 'X')
-        name_prefix = ''.join(ch for ch in name_prefix if ch.isalpha() or ch == 'X')[:2]
-        seed = f"{company_prefix}{name_prefix}".encode('utf-8')
-        digest = hashlib.md5(seed).hexdigest()
-        hash_digits = str(int(digest[:6], 16) % 1000).zfill(3)
-        return f"{company_prefix}{name_prefix}{hash_digits}"
-    except Exception as e:
-        logger.error("Error generating internship ID: %s", e)
-        return "XXXX00000"
+def get_cached_pdf_path(name: str, email: str, lookup: dict[str, Path]):
+    base_name = build_safe_attachment_name(name, email).lower()
+    return lookup.get(base_name)
 
 
 def get_sop_path() -> Path:
@@ -79,52 +62,47 @@ def get_sop_path() -> Path:
     return sop_path
 
 
-def prepare_biopay_agreement(duration: str, date: str, role: str, company_name: str) -> Path:
-    """Copy Biopay Agreement, update placeholders, and convert to PDF"""
-    biopay_template = Path(BIOPAY_AGREEMENT_FILE)
-    if not biopay_template.exists():
-        logger.warning("Biopay Agreement template not found at %s", BIOPAY_AGREEMENT_FILE)
-        return None
+def get_biopay_agreement_path() -> Path:
+    """Get Biopay Agreement PDF from Template folder"""
+    biopay_path = Path(BIOPAY_AGREEMENT_FILE)
+    if biopay_path.exists():
+        return biopay_path
+    
+    logger.warning("Biopay Agreement not found at %s", biopay_path)
+    return None
 
-    try:
-        doc = DocxTemplate(str(biopay_template))
-        context = {
-            "duration": duration,
-            "date": date,
-            "role": role,
-            "company_name": company_name,
-        }
-        doc.render(context)
-        
-        docx_output = unique_filepath(OUTPUT_FOLDER / "Biopay_Agreement_Updated.docx")
-        doc.save(str(docx_output))
-        logger.info("Updated Biopay Agreement with duration: %s and date: %s", duration, date)
-        
-        # Convert DOCX to PDF
-        pdf_output = docx_output.with_suffix('.pdf')
-        word = win32.Dispatch("Word.Application")
-        word.Visible = False
+
+def precache_attachment_bytes(sop_path, biopay_path):
+    """Read SOP and Biopay Agreement into memory ONCE. Returns (sop_bytes, biopay_bytes)."""
+    sop_bytes = None
+    biopay_bytes = None
+
+    if sop_path and sop_path.exists():
+        sop_bytes = sop_path.read_bytes()
+        logger.info("Pre-cached SOP (%s bytes)", len(sop_bytes))
+
+    if biopay_path and biopay_path.exists():
+        biopay_bytes = biopay_path.read_bytes()
+        logger.info("Pre-cached Biopay Agreement (%s bytes)", len(biopay_bytes))
+
+    return sop_bytes, biopay_bytes
+
+
+def precache_offer_pdfs(pdf_lookup: dict[str, Path]) -> dict[str, bytes]:
+    """Read all offer letter PDFs into memory ONCE for fast attachment."""
+    pdf_bytes_cache = {}
+    for key, path in pdf_lookup.items():
         try:
-            word_doc = word.Documents.Open(str(docx_output))
-            word_doc.SaveAs(str(pdf_output), FileFormat=17)
-            word_doc.Close()
-            logger.info("Converted Biopay Agreement to PDF: %s", pdf_output)
-        finally:
-            word.Quit()
-        
-        # Delete the DOCX file as we only need the PDF
-        try:
-            os.remove(str(docx_output))
+            pdf_bytes_cache[key] = path.read_bytes()
         except Exception as e:
-            logger.warning("Could not delete temp DOCX file: %s", e)
-        
-        return pdf_output
-    except Exception as e:
-        logger.error("Error preparing Biopay Agreement: %s", e)
-        return None
+            logger.warning("Could not pre-read PDF %s: %s", path.name, e)
+    logger.info("Pre-cached %s offer letter PDFs", len(pdf_bytes_cache))
+    return pdf_bytes_cache
 
 
-def send_email(smtp, index, row):
+def build_email_job(index, row, pdf_lookup, pdf_bytes_cache, sop_bytes, biopay_bytes):
+    """Validate and build a complete email job dict. Returns (job_dict, result_status) — 
+    if result_status is not None, the row was skipped/invalid."""
     name = str(row[NAME_COLUMN]).strip()
     email = str(row.get(EMAIL_COLUMN, "") or "").strip()
     status = str(row.get(STATUS_COLUMN, "") or "").strip().lower()
@@ -133,50 +111,57 @@ def send_email(smtp, index, row):
     company_name = str(row.get(COMPANY_COLUMN, "") or "").strip()
     duration = str(row.get(DURATION_COLUMN, "") or "").strip()
 
-    default_id = ""
     if status == "sent":
         logger.info("Already sent: %s", name)
-        return "already_sent", default_id
+        return None, "already_sent"
 
     if not name:
         logger.warning("Skipping row %s: missing %s", index + 1, NAME_COLUMN)
-        return "skipped", default_id
+        return None, "skipped"
 
     if not email:
         logger.warning("Skipping %s: no email provided", name)
-        return "skipped", default_id
+        return None, "skipped"
 
     if not validate_email(email):
         logger.warning("Skipping %s: invalid email %s", name, email)
-        return "invalid_email", default_id
+        return None, "invalid_email"
 
     if not role:
         logger.warning("Skipping %s: no role specified", name)
-        return "skipped", default_id
+        return None, "skipped"
 
     if not duty:
         logger.warning("Skipping %s: no duty specified", name)
-        return "skipped", default_id
+        return None, "skipped"
 
     if not company_name:
         logger.warning("Skipping %s: no company name specified", name)
-        return "skipped", default_id
+        return None, "skipped"
 
     if not duration:
         logger.warning("Skipping %s: no duration specified", name)
-        return "skipped", default_id
+        return None, "skipped"
 
-    pdf_path = get_pdf_path(name, email)
-    if not pdf_path or not pdf_path.exists():
-        logger.error("Missing PDF for %s at expected path %s", name, OUTPUT_FOLDER)
-        return "missing_file", default_id
+    # Check for PDF
+    pdf_key = build_safe_attachment_name(name, email).lower()
+    offer_pdf_bytes = pdf_bytes_cache.get(pdf_key)
+    if offer_pdf_bytes is None:
+        # Fallback: check on disk
+        pdf_path = get_cached_pdf_path(name, email, pdf_lookup)
+        if not pdf_path:
+            logger.error("Missing PDF for %s", name)
+            return None, "missing_file"
+        offer_pdf_bytes = pdf_path.read_bytes()
 
-    # Use existing internship ID from Excel if available, otherwise generate
+    pdf_filename = pdf_lookup.get(pdf_key, Path(f"{pdf_key}.pdf")).name
+
+    # Internship ID
     internship_id = str(row.get(INTERN_ID_COLUMN, "") or "").strip()
     if not internship_id:
         internship_id = generate_internship_id(company_name, name)
 
-    # Select email template based on role
+    # Build email template
     email_template = EMAIL_BODY_TECHNICAL if role.lower() == "technical" else EMAIL_BODY_NON_TECHNICAL
     email_body = email_template.format(
         name=name,
@@ -193,56 +178,83 @@ def send_email(smtp, index, row):
     except Exception:
         logger.debug("EMAIL_SUBJECT formatting skipped or invalid: %s", EMAIL_SUBJECT)
 
+    # Build the full EmailMessage object
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = GMAIL_EMAIL
     msg["To"] = email
     msg.set_content(email_body)
 
-    # Attach Offer Letter PDF
-    with open(pdf_path, "rb") as f:
+    # Attach Offer Letter PDF (from pre-cached bytes)
+    msg.add_attachment(
+        offer_pdf_bytes,
+        maintype="application",
+        subtype="pdf",
+        filename=pdf_filename,
+    )
+
+    # Attach SOP (from pre-cached bytes)
+    if sop_bytes:
         msg.add_attachment(
-            f.read(),
+            sop_bytes,
             maintype="application",
             subtype="pdf",
-            filename=pdf_path.name,
+            filename="SOP.pdf",
         )
 
-    # Attach SOP (as PDF)
-    sop_path = get_sop_path()
-    if sop_path:
-        with open(sop_path, "rb") as f:
-            msg.add_attachment(
-                f.read(),
-                maintype="application",
-                subtype="pdf",
-                filename="SOP.pdf",
-            )
-        logger.info("Attached SOP for %s", name)
-    else:
-        logger.warning("SOP not available for %s", name)
+    # Attach Biopay Agreement (from pre-cached bytes)
+    if biopay_bytes:
+        msg.add_attachment(
+            biopay_bytes,
+            maintype="application",
+            subtype="pdf",
+            filename="Biopay_Agreement.pdf",
+        )
 
-    offer_date = datetime.now().strftime(DATE_FORMAT)
-    # Attach Biopay Agreement (converted to PDF with duration and date updated)
-    biopay_path = prepare_biopay_agreement(duration, offer_date, role, company_name)
-    if biopay_path:
-        with open(biopay_path, "rb") as f:
-            msg.add_attachment(
-                f.read(),
-                maintype="application",
-                subtype="pdf",
-                filename="Biopay_Agreement.pdf",
-            )
-        logger.info("Attached Biopay Agreement for %s", name)
-    else:
-        logger.warning("Biopay Agreement not available for %s", name)
+    return {
+        "index": index,
+        "name": name,
+        "email": email,
+        "msg": msg,
+        "internship_id": internship_id,
+    }, None
 
-    smtp.send_message(msg)
-    logger.info("Sent email to %s <%s> with ID %s", name, email, internship_id)
-    return "sent", internship_id
+
+def _create_smtp_connection():
+    """Create an SMTP connection using config settings. Supports SSL and STARTTLS."""
+    if SMTP_USE_TLS:
+        # STARTTLS on port 587 (Outlook, some custom servers)
+        conn = smtplib.SMTP(SMTP_HOST, SMTP_PORT)
+        conn.ehlo()
+        conn.starttls()
+        conn.ehlo()
+    else:
+        # Direct SSL on port 465 (Gmail, Yahoo, Zoho)
+        conn = smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT)
+    conn.login(SENDER_EMAIL, SENDER_PASSWORD)
+    return conn
+
+
+def send_single_email(job):
+    """Send a single email using a per-thread SMTP connection. Thread-safe."""
+    thread_id = threading.current_thread().name
+    name = job["name"]
+    email = job["email"]
+    internship_id = job["internship_id"]
+
+    try:
+        with _create_smtp_connection() as smtp:
+            smtp.send_message(job["msg"])
+        logger.info("[%s] Sent email to %s <%s> with ID %s", thread_id, name, email, internship_id)
+        return job["index"], "sent", internship_id
+    except Exception as e:
+        logger.exception("[%s] Failed to send to %s <%s>", thread_id, name, email)
+        return job["index"], "failed", internship_id
 
 
 def main():
+    start_time = time.perf_counter()
+
     df = load_data()
     total = len(df)
     summary = {
@@ -257,30 +269,57 @@ def main():
     if not OUTPUT_FOLDER.exists():
         OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Starting email send process for %s rows", total)
+    # ---- Pre-cache all file data into memory ----
+    pdf_lookup = build_pdf_lookup()
+    sop_path = get_sop_path()
+    biopay_path = get_biopay_agreement_path()
 
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-            smtp.login(GMAIL_EMAIL, GMAIL_APP_PASSWORD)
-            for index, row in tqdm(df.iterrows(), total=total, desc="Sending", unit="email"):
+    sop_bytes, biopay_bytes = precache_attachment_bytes(sop_path, biopay_path)
+    pdf_bytes_cache = precache_offer_pdfs(pdf_lookup)
+
+    logger.info("Starting email send process for %s rows (workers=%s)", total, MAX_EMAIL_WORKERS)
+
+    # ---- Build all email jobs (validation + message construction) ----
+    email_jobs = []
+    for index, row in df.iterrows():
+        job, skip_reason = build_email_job(
+            index, row, pdf_lookup, pdf_bytes_cache, sop_bytes, biopay_bytes
+        )
+        if skip_reason:
+            summary[skip_reason] = summary.get(skip_reason, 0) + 1
+        elif job:
+            email_jobs.append(job)
+
+    logger.info("Prepared %s emails to send, %s skipped", len(email_jobs), total - len(email_jobs))
+
+    # ---- Send emails concurrently ----
+    if email_jobs:
+        df_lock = threading.Lock()
+
+        with ThreadPoolExecutor(max_workers=MAX_EMAIL_WORKERS) as pool:
+            futures = {pool.submit(send_single_email, job): job for job in email_jobs}
+            for future in tqdm(
+                as_completed(futures), total=len(futures), desc="Sending", unit="email"
+            ):
                 try:
-                    result, internship_id = send_email(smtp, index, row)
-                    if result:
-                        summary[result] = summary.get(result, 0) + 1
-                        if result == "sent":
-                            df.at[index, STATUS_COLUMN] = "Sent"
-                            df.at[index, INTERN_ID_COLUMN] = internship_id
-                            time.sleep(2)
+                    idx, result, internship_id = future.result()
+                    summary[result] = summary.get(result, 0) + 1
+                    if result == "sent":
+                        with df_lock:
+                            df.at[idx, STATUS_COLUMN] = "Sent"
+                            df.at[idx, INTERN_ID_COLUMN] = internship_id
                 except Exception:
                     summary["failed"] += 1
-                    logger.exception("Failed to send to row %s", index + 1)
-    except Exception:
-        logger.exception("SMTP connection failed")
-        raise
-    finally:
+                    logger.exception("Unexpected error in email future")
+
+    # ---- Save updated Excel ----
+    try:
         df.to_excel(EXCEL_FILE, index=False)
         logger.info("Saved updated Excel status: %s", EXCEL_FILE)
+    except Exception as e:
+        logger.error("Failed to save Excel: %s", e)
 
+    elapsed = time.perf_counter() - start_time
     print("\n===== Summary =====")
     print(f"Total rows: {total}")
     print(f"Sent: {summary['sent']}")
@@ -289,7 +328,8 @@ def main():
     print(f"Invalid emails: {summary['invalid_email']}")
     print(f"Missing PDFs: {summary['missing_file']}")
     print(f"Failed: {summary['failed']}")
-    logger.info("Send summary: %s", summary)
+    print(f"Time: {elapsed:.1f}s ({elapsed / max(summary['sent'], 1):.2f}s per email)")
+    logger.info("Send summary: %s (%.1fs)", summary, elapsed)
 
 
 if __name__ == "__main__":

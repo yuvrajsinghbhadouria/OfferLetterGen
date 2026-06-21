@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import os
 import re
@@ -69,6 +70,25 @@ def build_safe_attachment_name(name: str, email: str = None) -> str:
         local_part = email.split("@", 1)[0]
         base = f"{name} - {local_part}"
     return safe_filename(base)
+
+
+def generate_internship_id(company_name: str, intern_name: str) -> str:
+    """Generate deterministic 9-character ID.
+
+    Format: 4 company letters + 2 name letters + 3 checksum digits.
+    """
+    try:
+        company_prefix = (company_name or '').strip().upper()[:4].ljust(4, 'X')
+        company_prefix = ''.join(ch for ch in company_prefix if ch.isalpha() or ch == 'X')[:4]
+        name_prefix = (intern_name or '').strip().upper()[:2].ljust(2, 'X')
+        name_prefix = ''.join(ch for ch in name_prefix if ch.isalpha() or ch == 'X')[:2]
+        seed = f"{company_prefix}{name_prefix}".encode('utf-8')
+        digest = hashlib.md5(seed).hexdigest()
+        hash_digits = str(int(digest[:6], 16) % 1000).zfill(3)
+        return f"{company_prefix}{name_prefix}{hash_digits}"
+    except Exception as e:
+        logging.getLogger('utils').error("Error generating internship ID: %s", e)
+        return "XXXX00000"
 
 
 def find_matching_file(folder: str, base_name: str, extension: str):
