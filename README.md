@@ -1,3 +1,10 @@
+Now:-
+⚡ Generate 500+ offer letters in minutes
+📧 Send hundreds of personalized emails automatically
+📄 One-click DOCX → PDF conversion
+❌ Eliminate repetitive copy-paste work
+🔒 Secure environment variable configuration
+📝 Open Source
 # Offer Letter Automation
 
 Generates personalized offer letters from a Word template, converts them to PDF, and sends them by email.
