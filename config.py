@@ -87,7 +87,7 @@ Duration: {duration}
 Duties & Responsibilities:
 {duty}
 
-Please find attached your Offer Letter, SOP, and Biopay Agreement for detailed terms and conditions.
+Please find attached your Offer Letter, SOP, and Company name Agreement for detailed terms and conditions.
 
 Kindly review the documents and confirm your acceptance by replying to this email and Submit the Agreement Attached with your Photograph and Resume within next 7 Days
 
@@ -95,8 +95,8 @@ We are excited to welcome you to our technical team and look forward to working 
 
 Best Regards,
 
-Yuvraj Singh
-Founder & CEO
+Name
+Position 
 {company_name}
 """
 )
@@ -119,7 +119,7 @@ Duration: {duration}
 Duties & Responsibilities:
 {duty}
 
-Please find attached your Offer Letter, SOP, and Biopay Agreement for detailed terms and conditions.
+Please find attached your Offer Letter, SOP, and Company Name Agreement for detailed terms and conditions.
 
 Kindly review the documents and confirm your acceptance by replying to this email and Submit the Agreement Attached with your Photograph and Resume within next 7 Days. 
 
@@ -127,8 +127,8 @@ We are excited to have you on our team and look forward to working with you.
 
 Best Regards,
 
-Yuvraj Singh
-Founder & CEO
+Name
+Position
 {company_name}
 """
 )
@@ -166,9 +166,9 @@ SOP_FILE = os.path.join(
     "SOP.pdf"
 )
 
-BIOPAY_AGREEMENT_FILE = os.path.join(
+COMPANY NAME_AGREEMENT_FILE = os.path.join(
     TEMPLATE_FOLDER,
-    "BIOPAY AGREEMENT.pdf"
+    "Companyname_AGREEMENT.pdf"
 )
 
 DURATION_PLACEHOLDER = os.getenv("DURATION_PLACEHOLDER", "[Duration]")
