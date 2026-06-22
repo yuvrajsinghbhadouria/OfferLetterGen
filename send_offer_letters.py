@@ -62,30 +62,30 @@ def get_sop_path() -> Path:
     return sop_path
 
 
-def get_biopay_agreement_path() -> Path:
-    """Get Biopay Agreement PDF from Template folder"""
-    biopay_path = Path(BIOPAY_AGREEMENT_FILE)
-    if biopay_path.exists():
-        return biopay_path
+def get_COMPANY NAME_agreement_path() -> Path:
+    """Get COMPANY NAME Agreement PDF from Template folder"""
+    COMPANY NAME_path = Path(COMPANY NAME_AGREEMENT_FILE)
+    if COMPANY NAME_path.exists():
+        return COMPANY NAME_path
     
-    logger.warning("Biopay Agreement not found at %s", biopay_path)
+    logger.warning("COMPANY NAME Agreement not found at %s", COMPANY NAME_path)
     return None
 
 
-def precache_attachment_bytes(sop_path, biopay_path):
-    """Read SOP and Biopay Agreement into memory ONCE. Returns (sop_bytes, biopay_bytes)."""
+def precache_attachment_bytes(sop_path, COMPANY NAME_path):
+    """Read SOP and COMPANY NAME Agreement into memory ONCE. Returns (sop_bytes, Company Name_bytes)."""
     sop_bytes = None
-    biopay_bytes = None
+    Company Name_bytes = None
 
     if sop_path and sop_path.exists():
         sop_bytes = sop_path.read_bytes()
         logger.info("Pre-cached SOP (%s bytes)", len(sop_bytes))
 
-    if biopay_path and biopay_path.exists():
-        biopay_bytes = biopay_path.read_bytes()
-        logger.info("Pre-cached Biopay Agreement (%s bytes)", len(biopay_bytes))
+    if Company Name_path and Company Name_path.exists():
+        Company Name_bytes = Company Name_path.read_bytes()
+        logger.info("Pre-cached Company Name Agreement (%s bytes)", len(Company Name_bytes))
 
-    return sop_bytes, biopay_bytes
+    return sop_bytes, Company Name_bytes
 
 
 def precache_offer_pdfs(pdf_lookup: dict[str, Path]) -> dict[str, bytes]:
@@ -202,13 +202,13 @@ def build_email_job(index, row, pdf_lookup, pdf_bytes_cache, sop_bytes, biopay_b
             filename="SOP.pdf",
         )
 
-    # Attach Biopay Agreement (from pre-cached bytes)
-    if biopay_bytes:
+    # Attach Company Name Agreement (from pre-cached bytes)
+    if Company Name_bytes:
         msg.add_attachment(
-            biopay_bytes,
+            Company Name_bytes,
             maintype="application",
             subtype="pdf",
-            filename="Biopay_Agreement.pdf",
+            filename="Company Name_Agreement.pdf",
         )
 
     return {
@@ -272,9 +272,9 @@ def main():
     # ---- Pre-cache all file data into memory ----
     pdf_lookup = build_pdf_lookup()
     sop_path = get_sop_path()
-    biopay_path = get_biopay_agreement_path()
+    Company Name_path = get_Company Name_agreement_path()
 
-    sop_bytes, biopay_bytes = precache_attachment_bytes(sop_path, biopay_path)
+    sop_bytes, Company Name_bytes = precache_attachment_bytes(sop_path, biopay_path)
     pdf_bytes_cache = precache_offer_pdfs(pdf_lookup)
 
     logger.info("Starting email send process for %s rows (workers=%s)", total, MAX_EMAIL_WORKERS)
